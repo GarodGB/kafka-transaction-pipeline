@@ -2,6 +2,8 @@
 import json
 import os
 import time
+from dotenv import load_dotenv
+load_dotenv()
 
 import psycopg2
 from kafka import KafkaProducer
@@ -9,7 +11,7 @@ from kafka import KafkaProducer
 KAFKA = os.getenv("KAFKA_BOOTSTRAP", "localhost:9092")
 DB = dict(host=os.getenv("PGHOST", "localhost"), port=os.getenv("PGPORT", "5433"),
           dbname=os.getenv("PGDATABASE", "transactions"),
-          user=os.getenv("PGUSER", "admin"), password=os.getenv("PGPASSWORD", "admin"))
+          user=os.getenv("PGUSER", "admin"), password=os.environ["PGPASSWORD"])
 MAX_TRIES = 3
 
 producer = KafkaProducer(

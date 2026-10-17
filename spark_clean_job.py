@@ -9,7 +9,7 @@ JDBC_URL = (f"jdbc:postgresql://{os.getenv('PGHOST', 'postgres')}:"
             f"{os.getenv('PGPORT', '5432')}/{os.getenv('PGDATABASE', 'transactions')}")
 JDBC_PROPS = {
     "user": os.getenv("PGUSER", "admin"),
-    "password": os.getenv("PGPASSWORD", "admin"),
+    "password": os.environ["PGPASSWORD"],
     "driver": "org.postgresql.Driver",
 }
 

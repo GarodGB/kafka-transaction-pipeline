@@ -3,6 +3,8 @@ import hashlib
 import json
 import os
 import sys
+from dotenv import load_dotenv
+load_dotenv()
 
 import pandas as pd
 import psycopg2
@@ -13,7 +15,7 @@ DB = dict(
     host=os.getenv("PGHOST", "localhost"),
     port=int(os.getenv("PGPORT", "5433")),
     user=os.getenv("PGUSER", "admin"),
-    password=os.getenv("PGPASSWORD", "admin"),
+    password=os.environ["PGPASSWORD"],
     dbname=os.getenv("PGDATABASE", "transactions"),
 )
 EXPECTED_COLUMNS = [

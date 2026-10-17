@@ -3,6 +3,8 @@ import json
 import logging
 import os
 import signal
+from dotenv import load_dotenv
+load_dotenv()
 
 import psycopg2
 from kafka import KafkaConsumer, KafkaProducer
@@ -13,7 +15,7 @@ with open(os.getenv("PIPELINE_CONFIG", "config/pipeline_config.json")) as f:
     k = json.load(f)["kafka"]
 DB = dict(host=os.getenv("PGHOST", "localhost"), port=os.getenv("PGPORT", "5433"),
           dbname=os.getenv("PGDATABASE", "transactions"),
-          user=os.getenv("PGUSER", "admin"), password=os.getenv("PGPASSWORD", "admin"))
+          user=os.getenv("PGUSER", "admin"), password=os.environ["PGPASSWORD"])
 
 # ---------- structured logs: one JSON line per thing that happens ----------
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(message)s")

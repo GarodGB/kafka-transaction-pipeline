@@ -1,6 +1,8 @@
 """Create the Kafka topics explicitly, using the values from the config."""
 import json
 import os
+from dotenv import load_dotenv
+load_dotenv()
 
 from kafka.admin import KafkaAdminClient, NewTopic
 from kafka.errors import TopicAlreadyExistsError

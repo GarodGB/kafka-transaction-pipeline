@@ -1,13 +1,15 @@
 """Shared helpers for the tests: one database connection + the config."""
 import json
 import os
+from dotenv import load_dotenv
+load_dotenv()
 
 import psycopg2
 import pytest
 
 DB = dict(host=os.getenv("PGHOST", "localhost"), port=os.getenv("PGPORT", "5433"),
           dbname=os.getenv("PGDATABASE", "transactions"),
-          user=os.getenv("PGUSER", "admin"), password=os.getenv("PGPASSWORD", "admin"))
+          user=os.getenv("PGUSER", "admin"), password=os.environ["PGPASSWORD"])
 
 
 @pytest.fixture(scope="session")
