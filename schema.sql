@@ -87,9 +87,6 @@ CREATE TABLE IF NOT EXISTS transactions_cleaned (
     config_version    TEXT NOT NULL
 );
 
--- staging: Spark writes here first, then SQL merges into the clean table
-CREATE TABLE IF NOT EXISTS transactions_staging (LIKE transactions_cleaned INCLUDING DEFAULTS);
-
 -- =========================================================
 -- 3. PIPELINE BOOKKEEPING
 -- =========================================================
@@ -106,16 +103,11 @@ CREATE TABLE IF NOT EXISTS pipeline_runs (
     flag_counts     JSONB,
     report          JSONB,
     started_at      TIMESTAMP DEFAULT now(),
-    finished_at     TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS outbox_events (
-    event_id      BIGSERIAL PRIMARY KEY,
-    run_id        TEXT NOT NULL UNIQUE,
-    topic         TEXT NOT NULL,
-    payload       JSONB NOT NULL,
-    created_at    TIMESTAMP DEFAULT now(),
-    published_at  TIMESTAMP                  -- NULL = not sent yet
+    finished_at     TIMESTAMP,
+    -- the Kafka message for this run (the "outbox")
+    topic           TEXT,
+    payload         JSONB,
+    published_at    TIMESTAMP                -- NULL = not sent to Kafka yet
 );
 
 CREATE TABLE IF NOT EXISTS processed_events (

@@ -21,7 +21,7 @@ class FakeDLQ:
 
 
 def good_event(q):
-    return q("SELECT payload FROM outbox_events ORDER BY event_id DESC LIMIT 1")
+    return q("SELECT payload FROM pipeline_runs ORDER BY finished_at DESC LIMIT 1")
 
 
 # ---------- validate(): pure checks ----------

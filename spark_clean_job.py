@@ -302,9 +302,7 @@ print("QUALITY GATE PASSED")
 
 
 
-
-
-# ---------- 11. save: staging -> merge into transactions_cleaned (one transaction) ----------
+# ---------- 11. save: write straight into transactions_cleaned, then the bookkeeping ----------
 import hashlib
 from datetime import datetime, timezone
 import psycopg2
@@ -341,19 +339,31 @@ final = df.select(
     F.lit(cfg["config_version"]).alias("config_version"),
 )
 
-# 11c. Spark writes everything into the staging table (emptied first, table kept)
-(final.write.mode("overwrite").option("truncate", "true")
-      .jdbc(JDBC_URL, "transactions_staging", properties=JDBC_PROPS))
-print("staging written:", rows_cleaned, "rows")
+# 11c. write STRAIGHT into transactions_cleaned (txn_id is unique: new -> insert, existing -> update)
+for c in ["txn_date_time", "settle_date", "cleaned_at"]:            # timestamps -> plain text, Postgres reads them back
+    final = final.withColumn(c, F.date_format(c, "yyyy-MM-dd HH:mm:ss"))
 
-# 11d. one SQL transaction: merge + check + bookkeeping. All succeed, or nothing changes.
 cols = final.columns
-update_set = ", ".join(f"{c} = EXCLUDED.{c}" for c in cols if c != "txn_id")
-merge_sql = f"""
-    INSERT INTO transactions_cleaned ({", ".join(cols)})
-    SELECT {", ".join(cols)} FROM transactions_staging
-    ON CONFLICT (txn_id) DO UPDATE SET {update_set}
-"""
+upsert_sql = (f"INSERT INTO transactions_cleaned ({', '.join(cols)}) VALUES %s "
+              f"ON CONFLICT (txn_id) DO UPDATE SET "
+              + ", ".join(f"{c} = EXCLUDED.{c}" for c in cols if c != "txn_id"))
+PG = dict(host=os.getenv("PGHOST", "postgres"), port=os.getenv("PGPORT", "5432"),
+          dbname=os.getenv("PGDATABASE", "transactions"),
+          user=JDBC_PROPS["user"], password=JDBC_PROPS["password"])
+
+def upsert_partition(rows):
+    """Runs on each Spark worker: sends its pile of rows to Postgres in one go."""
+    import psycopg2
+    from psycopg2.extras import execute_values
+    conn = psycopg2.connect(**PG)
+    with conn, conn.cursor() as cur:
+        execute_values(cur, upsert_sql, [tuple(r) for r in rows], page_size=500)
+    conn.close()
+
+final.foreachPartition(upsert_partition)
+print("written to transactions_cleaned:", rows_cleaned, "rows")
+
+# 11d. one SQL transaction: check + bookkeeping. All succeed, or nothing changes.
 expected_sum = final.agg(F.sum("txn_amount")).first()[0]
 
 payload = {
@@ -365,46 +375,31 @@ payload = {
     "timestamp": datetime.now(timezone.utc).isoformat(),
 }
 
-conn = psycopg2.connect(host=os.getenv("PGHOST", "postgres"), port=os.getenv("PGPORT", "5432"),
-                        dbname=os.getenv("PGDATABASE", "transactions"),
-                        user=JDBC_PROPS["user"], password=JDBC_PROPS["password"])
+conn = psycopg2.connect(**PG)
 with conn:                       # commit at the end, or rollback if anything fails
     with conn.cursor() as cur:
-        cur.execute(merge_sql)
-        merged = cur.rowcount
-
         # reconcile: does the table now hold exactly what Spark produced?
         cur.execute("SELECT COUNT(*), SUM(txn_amount) FROM transactions_cleaned WHERE run_id = %s", (run_id,))
         db_count, db_sum = cur.fetchone()
         if db_count != rows_cleaned or db_sum != expected_sum:
             raise RuntimeError(f"reconcile failed: table {db_count}/{db_sum} vs spark {rows_cleaned}/{expected_sum}")
 
+        # the run report + the Kafka message, in ONE row of pipeline_runs (published_at stays NULL = not sent yet)
         cur.execute("""
             INSERT INTO pipeline_runs (run_id, status, source_file, file_hash, config_version,
-                rows_read, rows_cleaned, rows_dropped, rows_flagged, flag_counts, report, finished_at)
-            VALUES (%s, 'SUCCESS', %s, %s, %s, %s, %s, %s, %s, %s, %s, now())
+                rows_read, rows_cleaned, rows_dropped, rows_flagged, flag_counts, report, finished_at,
+                topic, payload)
+            VALUES (%s, 'SUCCESS', %s, %s, %s, %s, %s, %s, %s, %s, %s, now(), %s, %s)
             ON CONFLICT (run_id) DO UPDATE SET status = 'SUCCESS', report = EXCLUDED.report,
                 flag_counts = EXCLUDED.flag_counts, finished_at = now()
         """, (run_id, source_file, file_hash, cfg["config_version"], rows_read, rows_cleaned,
-              rows_dropped, rows_flagged, json.dumps(flag_counts), json.dumps(report)))
+              rows_dropped, rows_flagged, json.dumps(flag_counts), json.dumps(report),
+              cfg["kafka"]["topic"], json.dumps(payload)))
 
-        # the "letter" for Kafka, written in the SAME transaction (part 12 will send it)
-        cur.execute("""
-            INSERT INTO outbox_events (run_id, topic, payload) VALUES (%s, %s, %s)
-            ON CONFLICT (run_id) DO NOTHING
-        """, (run_id, cfg["kafka"]["topic"], json.dumps(payload)))
-
-        cur.execute("INSERT INTO audit_log (run_id, stage, event, details) VALUES (%s, 'write', 'merged', %s)",
-                    (run_id, json.dumps({"rows_merged": merged, "db_count": db_count})))
+        cur.execute("INSERT INTO audit_log (run_id, stage, event, details) VALUES (%s, 'write', 'upserted', %s)",
+                    (run_id, json.dumps({"rows_written": rows_cleaned, "db_count": db_count})))
 conn.close()
 
-print(f"merged {merged} rows | table has {db_count} rows for this run | sum {db_sum}")
+print(f"table has {db_count} rows for this run | sum {db_sum}")
 print("SAVED OK")
 spark.stop()
-
-
-
-
-
-
-

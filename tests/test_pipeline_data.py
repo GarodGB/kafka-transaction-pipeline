@@ -64,16 +64,16 @@ def test_fx_formula_matches_the_flag(q, cfg):
 
 
 # ---------- rerun safety ----------
-def test_merge_twice_does_not_duplicate(conn, q):
-    """Run the staging -> clean merge two times inside a test transaction, then undo it."""
+def test_writing_twice_does_not_duplicate(conn, q):
+    """Write every clean row into transactions_cleaned AGAIN, two times, then undo the test."""
     before = q("SELECT COUNT(*) FROM transactions_cleaned")
     with conn.cursor() as cur:
         for _ in range(2):
-            cur.execute("""INSERT INTO transactions_cleaned SELECT * FROM transactions_staging
+            cur.execute("""INSERT INTO transactions_cleaned SELECT * FROM transactions_cleaned
                            ON CONFLICT (txn_id) DO UPDATE SET txn_amount = EXCLUDED.txn_amount""")
     assert q("SELECT COUNT(*) FROM transactions_cleaned") == before
     conn.rollback()                                       # leave the real table untouched
 
 
-def test_one_outbox_event_per_run(q):
-    assert q("SELECT COUNT(*) - COUNT(DISTINCT run_id) FROM outbox_events") == 0
+def test_every_successful_run_has_its_kafka_message(q):
+    assert q("SELECT COUNT(*) FROM pipeline_runs WHERE status = 'SUCCESS' AND payload IS NULL") == 0
